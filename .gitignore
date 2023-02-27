@@ -7,3 +7,4 @@
 /*.egg-info
 dist/
 testutils/
+signal-tools/__pycache__/
