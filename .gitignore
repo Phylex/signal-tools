@@ -1,0 +1,9 @@
+*.pdf
+*.svg
+*.log
+/venv
+/hgcroc_toa_simulator/__pycache__/
+/__pycache__/
+/*.egg-info
+dist/
+testutils/
