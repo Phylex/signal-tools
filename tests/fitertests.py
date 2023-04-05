@@ -3,7 +3,7 @@ Test the various mo
 """
 import pytest
 import numpy as np
-from signals_systems_filters.filters import g_h_filter
+from signal_tools.filter import g_h_filter
 
 
 @pytest.mark.parametrize(

@@ -25,10 +25,50 @@ of intermediate results and hopefully deepening the understanding of the transfo
 
 Intermediate Data Format
 ------------------------
-Each possible filter produces a stream of data. A stream is allways characterized by consisting of a sequence of elements. The form of the element
-depends on the specific command but will most likey be a vector of numbers. An element is delimited by a new-line ``\\n``. A ``#`` at the beginning of a line
-marks the line as a comment and all content including escape sequences or special characters (except for the new-line of course) are ignored.
-Elements of differing lengths in a single stream may be possible and depend on the filter used in the pipeline. If in doubt consult the documentation
-of the tool and interrogate the output.
+Each possible filter streams it's output to ``stdout``. The output can consist of multiple streams that can each be a stream of multidimensional tensors.
+``#`` marks the line as a comment and all content including escape sequences or special characters (except for the new-line of course) are ignored.
 
-Tools may be able to provide a description of the data as comments at the beginning of the file, this functionality has mostly however not been implemented yet.
+The data format for interchanging data consists of two sections: Metadata and Data.
+
+Metadata
+~~~~~~~~
+
+The Metadata section is in YAML-like syntax and describes the properties of each stream, such as the shape and data type. The Metadata section starts with the keyword 
+``Metadata:``, followed by a list of dictionaries under the key ``streams``. Each dictionary represents a stream and must have the keys ``shape`` and ``type``.
+
+The "shape" key is a tuple specifying the dimensions of the tensor for that stream. The "type" key specifies the data type of the tensor elements, which can be ``int32``, ``float32``, or ``float64``.
+
+Example:
+
+.. code-block:: none
+
+   Metadata:
+   streams:
+     - shape: (2, 2)
+       type: float32
+     - shape: (3,)
+       type: int32
+     - shape: (2, 3)
+       type: float64
+
+Data
+~~~~
+
+The Data section contains the actual data of the tensors. Each line in the Data section represents a set of tensors, one from each stream.
+The tensors are separated by the pipe symbol "|". The elements within each tensor are listed in column-major order and separated by a comma and/or whitespace.
+
+Example:
+
+.. code-block:: none
+
+   Data:
+   1.0, 2.0, 3.0, 4.0 | 1, 2, 3 | 1.0, 2.0, 3.0, 4.0, 5.0, 6.0
+   5.0, 6.0, 7.0, 8.0 | 4, 5, 6 | 7.0, 8.0, 9.0, 10.0, 11.0, 12.0
+
+or also in the case of mixed commas and spaces 
+
+.. code-block:: none
+
+   Data:
+   1, 2 3, 4 5, 6 | 1.0 2.0
+   7, 8 9, 10 11, 12 | 3.0, 4.0
