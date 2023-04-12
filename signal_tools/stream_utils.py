@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def arrays_to_data_line(arrays: list[np.ndarray]) -> str:
     tensor_strings = []
 

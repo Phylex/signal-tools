@@ -1,18 +1,28 @@
 import numpy as np
 import re
 import yaml
-from typing import TextIO, Tuple, List, Dict, Any
+from typing import TextIO, List, Dict, Any
 
 
-class DataStream:
+class SignalStreams:
     def __init__(self, text_stream: TextIO):
         self.text_stream = text_stream
-        self.metadata = DataStream._parse_metadata(self.text_stream)
+        self.metadata = SignalStreams._parse_metadata(self.text_stream)
         self.num_streams = len(self.metadata["streams"])
         self.data_pattern = self._generate_data_regex(self.metadata["streams"])
 
     @staticmethod
     def _readline_skip_comments(text_stream: TextIO) -> str:
+        """
+        Reads a line from the text stream, skipping lines that start with a
+        comment character ('#').
+
+        :param text_stream: The input text stream.
+        :type text_stream: TextIO
+        :return: The next non-comment line from the text stream. Returns an
+                 empty string if the end of the file is reached.
+        :rtype: str
+        """
         line = text_stream.readline()
         while re.match(r"^\s*#", line) is not None:
             if line == "":  # End of file
@@ -22,13 +32,31 @@ class DataStream:
 
     @staticmethod
     def _parse_metadata(text_stream: TextIO) -> Dict[str, Any]:
+        """
+        Parses the metadata section from the given text stream.
+
+        This function reads the metadata section from the input text stream,
+        and returns a dictionary containing the parsed metadata. The function
+        checks for valid metadata structure and content, including the presence
+        of a list of streams, as well as the 'shape' and 'type' attributes for
+        each stream.
+
+        :param text_stream: The input text stream containing the metadata
+                            section.
+        :type text_stream: TextIO
+        :return: A dictionary containing the parsed metadata.
+        :rtype: Dict[str, Any]
+        :raises ValueError: If the metadata format is invalid, or if any of the
+                            required attributes are missing or
+                            have incorrect data types.
+        """
         metadata_str = ""
-        line = DataStream._readline_skip_comments(text_stream)
+        line = SignalStreams._readline_skip_comments(text_stream)
         if line.startswith("Metadata:"):
-            line = DataStream._readline_skip_comments(text_stream)
+            line = SignalStreams._readline_skip_comments(text_stream)
             while not line.startswith("Data:"):
                 metadata_str += line
-                line = DataStream._readline_skip_comments(text_stream)
+                line = SignalStreams._readline_skip_comments(text_stream)
         try:
             metadata = yaml.safe_load(metadata_str)
         except yaml.YAMLError as e:
@@ -40,20 +68,33 @@ class DataStream:
         for stream in metadata["streams"]:
             if "shape" not in stream or "type" not in stream:
                 raise ValueError("Each stream must have a 'shape' and 'type'")
-        if not isinstance(stream["shape"], list | int):
-            raise ValueError(
-                "The shape attribute needs to be a list of "
-                "intger or an integer")
-        if isinstance(stream["shape"], list):
-            for elem in stream["shape"]:
-                if not isinstance(elem, int):
-                    raise ValueError(
-                        "Dimensions of the tensor need to be integer")
-
+            if not isinstance(stream["shape"], list | int):
+                raise ValueError(
+                    "The shape attribute needs to be a list of "
+                    "intger or an integer")
+            if isinstance(stream["shape"], list):
+                for elem in stream["shape"]:
+                    if not isinstance(elem, int):
+                        raise ValueError(
+                            "Dimensions of the tensor need to be integer")
         return metadata
 
     @staticmethod
     def _convert_type(stream: Dict[str, Any], value: str) -> Any:
+        """
+        Converts the given value string to the data type specified in the
+        stream dictionary.
+
+        :param stream: A dictionary containing the stream metadata, including
+                       the 'type' key.
+        :type stream: Dict[str, Any]
+        :param value: The value string to be converted.
+        :type value: str
+        :return: The converted value with the appropriate data type.
+        :rtype: Any
+        :raises ValueError: If the specified data type in the stream dictionary
+                            is not supported.
+        """
         if stream["type"] == "int":
             return int(value)
         elif stream["type"] == "float":
@@ -63,13 +104,30 @@ class DataStream:
 
     @staticmethod
     def _generate_data_regex(streams: list[dict[str, Any]]) -> re.Pattern:
+        """
+        Generates a regular expression pattern for parsing data lines based on
+        the stream metadata.
+
+        This function generates a regular expression pattern to match and parse
+        data lines in the data section. The pattern is based on the information
+        provided in the metadata section. The function handles variable-length
+        streams (indicated by a shape of [-1]) and fixed-length streams.
+
+        :param streams: A list of dictionaries containing the metadata for each
+                        stream. Each dictionary should have a 'shape' and
+                        'type' key.
+        :type streams: list[dict[str, Any]]
+        :return: A compiled regular expression pattern for matching and parsing
+                 data lines.
+        :rtype: re.Pattern
+        """
         multi_val_next_pattern = r"((\s*,?\s*)%s){%d}"
         int_pattern = r"[\+\-]?\d+"
         float_pattern = r"[\+\-]?\d+(\.\d+)?([eE][\+\-]?\d+)?"
         regex_parts = []
         for stream in streams:
             shape = tuple(stream["shape"])
-            num_elements = np.prod(shape)
+            num_elements = np.prod(shape) if shape[0] != -1 else 0
             dtype = stream["type"]
 
             if dtype == "int":
@@ -78,8 +136,10 @@ class DataStream:
                 value_pattern = float_pattern
             else:
                 raise ValueError(f"Unsupported data type: {dtype}")
-
-            if num_elements > 1:
+            if shape[0] == -1:
+                regex_parts.append(
+                        rf"({value_pattern}(\s*,?\s*{value_pattern})*)?")
+            elif num_elements > 0:
                 regex_parts.append(
                     value_pattern +
                     (multi_val_next_pattern % (value_pattern, num_elements - 1)))
@@ -91,6 +151,14 @@ class DataStream:
         return self
 
     def __next__(self) -> List[np.ndarray]:
+        """
+        Returns the next parsed tensors from the data stream.
+
+        :return: A list of numpy arrays representing the parsed tensors.
+        :rtype: List[np.ndarray]
+        :raises StopIteration: If the end of the data stream is reached.
+        :raises ValueError: If the data line doesn't match the expected format.
+        """
         line = self._readline_skip_comments(self.text_stream)
         print(line)
 

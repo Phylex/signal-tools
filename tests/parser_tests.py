@@ -1,8 +1,8 @@
 import io
 import pytest
-from signal_tools.parsers import DataStream
+from signal_tools.parsers import SignalStreams
 import numpy as np
-from typing import Any
+from typing import Any, Tuple, List
 
 
 @pytest.mark.parametrize("input_data,expected_lines", [
@@ -36,7 +36,7 @@ def test_readline_skip_comments(input_data: str, expected_lines: list[str]):
     input_stream = io.StringIO(input_data)
 
     for expected_line in expected_lines:
-        line = DataStream._readline_skip_comments(input_stream)
+        line = SignalStreams._readline_skip_comments(input_stream)
         assert line == expected_line
 
 
@@ -95,7 +95,7 @@ def test_readline_skip_comments(input_data: str, expected_lines: list[str]):
 def test_data_stream(input_data: str,
                      expected_tensors: list[list[np.ndarray]]):
     input_stream = io.StringIO(input_data)
-    ds = DataStream(input_stream)
+    ds = SignalStreams(input_stream)
 
     for expected, parsed in zip(expected_tensors, ds):
         for e, p in zip(expected, parsed):
@@ -109,7 +109,7 @@ def test_data_stream(input_data: str,
     ({"type": "float"}, "-0.5", -0.5),
 ])
 def test_convert_type(stream: dict[str, Any], value_str: str, expected_value: Any):
-    converted_value = DataStream._convert_type(stream, value_str)
+    converted_value = SignalStreams._convert_type(stream, value_str)
     assert converted_value == expected_value
 
 
@@ -119,7 +119,7 @@ def test_convert_type(stream: dict[str, Any], value_str: str, expected_value: An
 ])
 def test_convert_type_unsupported_type(stream: dict[str, Any], value_str: str):
     with pytest.raises(ValueError, match="Unsupported data type:"):
-        DataStream._convert_type(stream, value_str)
+        SignalStreams._convert_type(stream, value_str)
 
 
 @pytest.mark.parametrize("streams, example_data", [
@@ -165,7 +165,7 @@ def test_convert_type_unsupported_type(stream: dict[str, Any], value_str: str):
     ),
 ])
 def test_generate_data_regex(streams: list[dict[str, Any]], example_data: list[str]):
-    regex = DataStream._generate_data_regex(streams)
+    regex = SignalStreams._generate_data_regex(streams)
     for data in example_data:
         print(regex)
         match = regex.fullmatch(data)
@@ -194,6 +194,109 @@ def test_generate_data_regex(streams: list[dict[str, Any]], example_data: list[s
     ),
 ])
 def test_generate_data_regex_invalid(streams: list[dict[str, Any]], invalid_data: str):
-    regex = DataStream._generate_data_regex(streams)
+    regex = SignalStreams._generate_data_regex(streams)
     match = regex.fullmatch(invalid_data)
     assert match is None
+
+
+@pytest.mark.parametrize("input_str,expected", [
+    (
+        "Metadata:\n"
+        "  streams:\n"
+        "    - shape: [-1]\n"
+        "      type: int\n"
+        "    - shape: [4]\n"
+        "      type: int\n"
+        "Data:\n"
+        "1 2 3 | 4 5 6 7\n"
+        "1 | 4 5 6 7\n"
+        "1 2 | 4 5 6 7\n"
+        "1 2 3 4 | 4 5 6 7\n",
+        [
+            (np.array([1, 2, 3]), np.array([4, 5, 6, 7])),
+            (np.array([1, ]), np.array([4, 5, 6, 7])),
+            (np.array([1, 2]), np.array([4, 5, 6, 7])),
+            (np.array([1, 2, 3, 4]), np.array([4, 5, 6, 7]))
+        ]
+    ),
+    (
+        "Metadata:\n"
+        "  streams:\n"
+        "    - shape: [-1]\n"
+        "      type: float\n"
+        "    - shape: [3]\n"
+        "      type: float\n"
+        "Data:\n"
+        "1.1, 2.2, 3.3 | 4.4 5.5, 6.6\n"
+        "1.1, 2.2 | 4.4 5.5, 6.6\n"
+        "1.1 | 4.4 5.5, 6.6\n"
+        "1.1, 2.2, 3.3, 4.4 | 4.4 5.5, 6.6\n",
+        [
+            (np.array([1.1, 2.2, 3.3]), np.array([4.4, 5.5, 6.6])),
+            (np.array([1.1, 2.2, ]), np.array([4.4, 5.5, 6.6])),
+            (np.array([1.1, ]), np.array([4.4, 5.5, 6.6])),
+            (np.array([1.1, 2.2, 3.3, 4.4]), np.array([4.4, 5.5, 6.6]))
+        ]
+    ),
+    (
+        "Metadata:\n"
+        "  streams:\n"
+        "    - shape: [-1]\n"
+        "      type: float\n"
+        "Data:\n"
+        "1e-3, 2.0e3\n"
+        "1e-3, 2.0e3\n"
+        "1e-3, 2.0e3\n",
+        [
+            (np.array([1e-3, 2.0e3]), np.array([3.0e+3])),
+            (np.array([1e-3, 2.0e3]), np.array([3.0e+3])),
+            (np.array([1e-3, 2.0e3]), np.array([3.0e+3])),
+        ]
+    ),
+    (
+        "Metadata:\n"
+        "  streams:\n"
+        "    - shape: [-1]\n"
+        "      type: int\n"
+        "Data:\n"
+        "1 2 3 \n"
+        "\n"
+        "1 2 3 4 \n"
+        "1 2\n",
+        [
+            (np.array([1, 2, 3])),
+            (np.array([])),
+            (np.array([1, 2, 3, 4])),
+            (np.array([1, 2]))
+        ]
+    ),
+    (
+        "Metadata:\n"
+        "  streams:\n"
+        "    - shape: [-1]\n"
+        "      type: float\n"
+        "    - shape: [3]\n"
+        "      type: float\n"
+        "Data:\n"
+        "1 | 4.4 5.5, 6.6\n"
+        "| 4.4 5.5, 6.6\n"
+        "0 | 4.4 5.5, 6.6\n",
+        [
+            (np.array([1.]), np.array([4.4, 5.5, 6.6])),
+            (np.array([]), np.array([4.4, 5.5, 6.6])),
+            (np.array([0.]), np.array([4.4, 5.5, 6.6]))
+        ]
+    )
+])
+def test_variable_length_stream(input_str: str, expected: List[Tuple[np.ndarray]]):
+    text_stream = io.StringIO(input_str)
+    data_stream = SignalStreams(text_stream)
+
+    output = []
+    for tensors in data_stream:
+        output.append(tuple(tensors))
+
+    for i, (expected_tensors, output_tensors) in enumerate(zip(expected, output)):
+        for j, (expected_tensor, output_tensor) in enumerate(zip(expected_tensors, output_tensors)):
+            assert np.array_equal(expected_tensor, output_tensor), f"Error in tensors {i}, {j}: expected {expected_tensor}, got {output_tensor}"
+
