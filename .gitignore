@@ -9,3 +9,4 @@ dist/
 testutils/
 signal_tools/__pycache__/
 /build
+docs/_build
