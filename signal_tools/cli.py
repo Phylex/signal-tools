@@ -61,7 +61,7 @@ def file_io(ctx, file_path: click.Path, direction: str, encoding: str) -> None:
               type=(int, click.Choice(['int', 'float'])),
               help="Designate the data type of the column "
                    "(either 'int' or 'float'), defaults to float",
-              default=(-1, 'float'))
+              default=[[-1, 'float']])
 @click.pass_context
 def read_csv(ctx, delimiter: str,
              signal_column: tuple[int],
@@ -73,11 +73,12 @@ def read_csv(ctx, delimiter: str,
         ctx.obj['in'], delimiter=delimiter, skipinitialspace=True)
     out = ctx.obj['out']
     col_names = next(csvr)
+    col_idx = list(range(len(col_names)))
     columns_with_types = list(map(lambda c: c[0], column_type))
-    if any(lambda i: i not in range(len(col_names)), columns_with_types):
+    if any(map(lambda i: i not in col_idx and i != -1, columns_with_types)):
         raise ValueError(f"Invalid column index in column format "
                          f"specification. {len(col_names)} available")
-    if any(lambda i: i not in range(len(col_names)), col_names):
+    if any(map(lambda i: i not in col_idx, signal_column)):
         raise ValueError(f"Invalid column index in column selection. {len(col_names)} available")
 
     # generate the description dict for the requested data
@@ -86,7 +87,7 @@ def read_csv(ctx, delimiter: str,
         if i in signal_column:
             column_descriptions.append(
                 {'name': str(name),
-                 'type': column_type[i]
+                 'type': str(column_type[i][1])
                     if i in columns_with_types else 'float',
                  'shape': [1]
                  })
@@ -103,7 +104,7 @@ def read_csv(ctx, delimiter: str,
                 map(lambda elem: np.array([elem[1]]),
                     filter(lambda elem: elem[0] in signal_column,
                            enumerate(line))))
-        out.write(arrays_to_data_line(req_data))
+        out.write(arrays_to_data_line(req_data)+'\n')
 
 
 @click.command()
@@ -169,9 +170,4 @@ def plot(ctx: click.Context):
     plt.show()
 
 
-stream_cli.add_command(apply_trapezoidal_filter)
-stream_cli.add_command(digitize)
-stream_cli.add_command(plot)
-
-file_io.add_command(print_input)
 file_io.add_command(read_csv)
