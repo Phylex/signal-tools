@@ -17,8 +17,3 @@ Design Goals
 The tools are designed so that they can be interconnected using the unix Pipe. Using this technique, mltiple invocations of the command can be
 combined with very little effort to form more complex processing pipelines. This should allow for experimentation and exploration with minimal
 coding required.
-
-Due to the nature of unix Pipes, only a single stream can be processed per command invocation. If more complex pipelines are to be built using
-these tools, it is recommended to split the pipeline into multiple stages that are executed sequentially. The data in between every command is
-transmitted as human readable text, which enables the splitting of a single pipeline into multiple stages at arbitrary points, aiding exploration
-of intermediate results and hopefully deepening the understanding of the transformation system.

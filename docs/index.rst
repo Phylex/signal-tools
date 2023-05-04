@@ -6,6 +6,7 @@ Signal-Tools Documentation
    :caption: Contents:
 
    readme
+   architecture
    file_format
 
 
