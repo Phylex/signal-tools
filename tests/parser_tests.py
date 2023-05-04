@@ -2,7 +2,8 @@ import io
 import pytest
 from signal_tools.parsers import SignalStreams
 import numpy as np
-from typing import Any, Tuple, List
+from typing import Any, Tuple, List, Dict
+from io import StringIO
 
 
 @pytest.mark.parametrize("input_data,expected_lines", [
@@ -66,11 +67,11 @@ def test_readline_skip_comments(input_data: str, expected_lines: list[str]):
         "2.0 | 3, 4\n",
         [
             [
-                np.array([[1.0]], dtype=np.float32),
+                np.array([1.0], dtype=np.float32),
                 np.array([1, 2], dtype=np.int32),
             ],
             [
-                np.array([[2.0]], dtype=np.float32),
+                np.array([2.0], dtype=np.float32),
                 np.array([3, 4], dtype=np.int32),
             ],
         ]
@@ -171,6 +172,7 @@ def test_generate_data_regex(streams: list[dict[str, Any]], example_data: list[s
         match = regex.fullmatch(data)
         assert match is not None
 
+
 @pytest.mark.parametrize("streams, invalid_data", [
     (
         [{"type": "int", "shape": (2,)}],
@@ -213,10 +215,10 @@ def test_generate_data_regex_invalid(streams: list[dict[str, Any]], invalid_data
         "1 2 | 4 5 6 7\n"
         "1 2 3 4 | 4 5 6 7\n",
         [
-            (np.array([1, 2, 3]), np.array([4, 5, 6, 7])),
-            (np.array([1, ]), np.array([4, 5, 6, 7])),
-            (np.array([1, 2]), np.array([4, 5, 6, 7])),
-            (np.array([1, 2, 3, 4]), np.array([4, 5, 6, 7]))
+            [np.array([1, 2, 3]), np.array([4, 5, 6, 7])],
+            [np.array([1, ]), np.array([4, 5, 6, 7])],
+            [np.array([1, 2]), np.array([4, 5, 6, 7])],
+            [np.array([1, 2, 3, 4]), np.array([4, 5, 6, 7])]
         ]
     ),
     (
@@ -232,10 +234,10 @@ def test_generate_data_regex_invalid(streams: list[dict[str, Any]], invalid_data
         "1.1 | 4.4 5.5, 6.6\n"
         "1.1, 2.2, 3.3, 4.4 | 4.4 5.5, 6.6\n",
         [
-            (np.array([1.1, 2.2, 3.3]), np.array([4.4, 5.5, 6.6])),
-            (np.array([1.1, 2.2, ]), np.array([4.4, 5.5, 6.6])),
-            (np.array([1.1, ]), np.array([4.4, 5.5, 6.6])),
-            (np.array([1.1, 2.2, 3.3, 4.4]), np.array([4.4, 5.5, 6.6]))
+            [np.array([1.1, 2.2, 3.3]), np.array([4.4, 5.5, 6.6])],
+            [np.array([1.1, 2.2, ]), np.array([4.4, 5.5, 6.6])],
+            [np.array([1.1, ]), np.array([4.4, 5.5, 6.6])],
+            [np.array([1.1, 2.2, 3.3, 4.4]), np.array([4.4, 5.5, 6.6])]
         ]
     ),
     (
@@ -248,9 +250,9 @@ def test_generate_data_regex_invalid(streams: list[dict[str, Any]], invalid_data
         "1e-3, 2.0e3\n"
         "1e-3, 2.0e3\n",
         [
-            (np.array([1e-3, 2.0e3]), np.array([3.0e+3])),
-            (np.array([1e-3, 2.0e3]), np.array([3.0e+3])),
-            (np.array([1e-3, 2.0e3]), np.array([3.0e+3])),
+            [np.array([1e-3, 2.0e3]), np.array([3.0e+3])],
+            [np.array([1e-3, 2.0e3]), np.array([3.0e+3])],
+            [np.array([1e-3, 2.0e3]), np.array([3.0e+3])],
         ]
     ),
     (
@@ -264,10 +266,10 @@ def test_generate_data_regex_invalid(streams: list[dict[str, Any]], invalid_data
         "1 2 3 4 \n"
         "1 2\n",
         [
-            (np.array([1, 2, 3])),
-            (np.array([])),
-            (np.array([1, 2, 3, 4])),
-            (np.array([1, 2]))
+            [np.array([1, 2, 3])],
+            [np.array([])],
+            [np.array([1, 2, 3, 4])],
+            [np.array([1, 2])]
         ]
     ),
     (
@@ -282,9 +284,9 @@ def test_generate_data_regex_invalid(streams: list[dict[str, Any]], invalid_data
         "| 4.4 5.5, 6.6\n"
         "0 | 4.4 5.5, 6.6\n",
         [
-            (np.array([1.]), np.array([4.4, 5.5, 6.6])),
-            (np.array([]), np.array([4.4, 5.5, 6.6])),
-            (np.array([0.]), np.array([4.4, 5.5, 6.6]))
+            [np.array([1.]), np.array([4.4, 5.5, 6.6])],
+            [np.array([]), np.array([4.4, 5.5, 6.6])],
+            [np.array([0.]), np.array([4.4, 5.5, 6.6])]
         ]
     )
 ])
@@ -292,11 +294,67 @@ def test_variable_length_stream(input_str: str, expected: List[Tuple[np.ndarray]
     text_stream = io.StringIO(input_str)
     data_stream = SignalStreams(text_stream)
 
-    output = []
-    for tensors in data_stream:
-        output.append(tuple(tensors))
-
-    for i, (expected_tensors, output_tensors) in enumerate(zip(expected, output)):
+    for i, (expected_tensors, output_tensors) in enumerate(zip(expected, data_stream)):
         for j, (expected_tensor, output_tensor) in enumerate(zip(expected_tensors, output_tensors)):
-            assert np.array_equal(expected_tensor, output_tensor), f"Error in tensors {i}, {j}: expected {expected_tensor}, got {output_tensor}"
+            assert np.array_equal(
+                expected_tensor, output_tensor), f"Error in tensors {i}, {j}: expected {expected_tensor}, got {output_tensor}"
 
+
+@pytest.mark.parametrize("serial_data, expected", [
+    (
+        """\
+Metadata:
+streams:
+  - name: stream1
+    type: int
+    shape: [2, 2]
+  - name: stream2
+    type: float
+    shape: [3]
+  - name: stream3
+    type: int
+    shape: [-1]
+Data:
+1, 2, 3, 4 | 1.1, 2.2, 3.3 | 5, 6,
+4, 3, 2, 1 | 4.4, 5.5, 6.6 | 7, 8, 9,
+6, 5, 4, 3 | 7.7, 8.8, 9.9 | 10, 11, 12, 13,
+4, 5, 6, 7 | 10.1, 11.1, 12.1 |
+10, 9, 8, 7 | 13.2, 14.2, 15.2 | 14, 15, 16, 17, 18,
+""",
+        [
+            ({"name": "stream1", "type": "int", "shape": [2, 2]},
+             [np.array([[1, 3], [2, 4]]),
+              np.array([[4, 2], [3, 1]]),
+              np.array([[6, 4], [5, 3]]),
+              np.array([[4, 6], [5, 7]]),
+              np.array([[10, 8], [9, 7]])
+              ]
+             ),
+            ({"name": "stream2", "type": "float", "shape": [3]},
+             [np.array([1.1, 2.2, 3.3]),
+              np.array([4.4, 5.5, 6.6]),
+              np.array([7.7, 8.8, 9.9]),
+              np.array([10.1, 11.1, 12.1]),
+              np.array([13.2, 14.2, 15.2]),
+              ]
+             ),
+            ({"name": "stream3", "type": "int", "shape": [-1]},
+             [np.array([5, 6]),
+              np.array([7, 8, 9]),
+              np.array([10, 11, 12, 13]),
+              np.array([]),
+              np.array([14, 15, 16, 17, 18]),
+              ],
+             ),
+        ]
+    ),
+])
+def test_split_into_individual_streams(serial_data: str, expected: List[Tuple[Dict[str, Any], List[np.ndarray]]]):
+    text_stream = StringIO(serial_data)
+    data_stream = SignalStreams(text_stream)
+    individual_streams = data_stream.split_into_individual_streams()
+
+    for (stream_metadata, stream), (expected_metadata, expected_stream) in zip(individual_streams, expected):
+        assert stream_metadata == expected_metadata
+        for tensor, expected_tensor in zip(stream, expected_stream):
+            assert np.array_equal(tensor, expected_tensor)

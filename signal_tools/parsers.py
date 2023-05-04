@@ -1,7 +1,10 @@
+from itertools import tee
 import numpy as np
 import re
 import yaml
-from typing import TextIO, List, Dict, Any
+from functools import partial
+from .stream_utils import validate_metadata
+from typing import TextIO, List, Dict, Any, Iterable, Tuple
 
 
 class SignalStreams:
@@ -66,17 +69,7 @@ class SignalStreams:
             raise ValueError("Metadata must contain a list of streams")
 
         for stream in metadata["streams"]:
-            if "shape" not in stream or "type" not in stream:
-                raise ValueError("Each stream must have a 'shape' and 'type'")
-            if not isinstance(stream["shape"], list | int):
-                raise ValueError(
-                    "The shape attribute needs to be a list of "
-                    "intger or an integer")
-            if isinstance(stream["shape"], list):
-                for elem in stream["shape"]:
-                    if not isinstance(elem, int):
-                        raise ValueError(
-                            "Dimensions of the tensor need to be integer")
+            validate_metadata(stream)
         return metadata
 
     @staticmethod
@@ -126,6 +119,8 @@ class SignalStreams:
         float_pattern = r"[\+\-]?\d+(\.\d+)?([eE][\+\-]?\d+)?"
         regex_parts = []
         for stream in streams:
+            if isinstance(stream["shape"], int):
+                stream["shape"] = [stream["shape"]]
             shape = tuple(stream["shape"])
             num_elements = np.prod(shape) if shape[0] != -1 else 0
             dtype = stream["type"]
@@ -147,7 +142,27 @@ class SignalStreams:
                 regex_parts.append(value_pattern)
         return re.compile(r"\s*\|\s*".join(regex_parts))
 
+    def split_into_individual_streams(self) -> list[Tuple[dict, Iterable]]:
+        """
+        Split the single data stream into many different data streams
+        """
+        print(list(enumerate(self.metadata["streams"])))
+        whole_data_streams = tee(iter(self), self.num_streams)
+        split_data_streams = []
+
+        def f(x, index):
+            return x[index]
+        indexed_f = [partial(f, index=i) for i in range(self.num_streams)]
+        split_data_streams = [map(idx_f, stream)
+                              for idx_f, stream in
+                              zip(indexed_f, whole_data_streams)]
+        return list(zip(self.metadata["streams"], split_data_streams))
+
     def __iter__(self):
+        """
+        This class implements the iter method all by itself so
+        just return the class
+        """
         return self
 
     def __next__(self) -> List[np.ndarray]:
@@ -160,7 +175,6 @@ class SignalStreams:
         :raises ValueError: If the data line doesn't match the expected format.
         """
         line = self._readline_skip_comments(self.text_stream)
-        print(line)
 
         if not line:
             raise StopIteration
@@ -174,18 +188,18 @@ class SignalStreams:
             ',', ' ').replace('\t', ' ').split('|')
 
         tensors = []
-        for stream, tensor_str in zip(self.metadata["streams"], tensor_strings):
-            num_elements = int(np.prod(stream["shape"]))
+        for stream_metadata, tensor_str in zip(self.metadata["streams"], tensor_strings):
             data_values = tensor_str.split()
             tensor_values = [
-                self._convert_type(stream, data_values[i])
-                for i in range(num_elements)
+                self._convert_type(stream_metadata, dv)
+                for dv in data_values
             ]
-            if len(stream["shape"]) > 1 and stream["shape"][1] > 1:
-                tensor = np.array(tensor_values, dtype=stream["type"]).reshape(
-                    stream["shape"], order="F")
+            if len(stream_metadata["shape"]) > 1 and stream_metadata["shape"][1] > 1:
+                tensor = np.array(tensor_values, dtype=stream_metadata["type"]).reshape(
+                    stream_metadata["shape"], order="F")
                 tensors.append(tensor)
             else:
-                tensor = np.array(tensor_values, dtype=stream["type"])
-
+                tensor = np.array(tensor_values, dtype=stream_metadata["type"])
+                tensors.append(tensor)
+        print(tensors)
         return tensors

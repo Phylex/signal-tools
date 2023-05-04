@@ -1,18 +1,21 @@
-from itertools import tee
 from pathlib import Path
 import sys
 import csv
+import yaml
+import click
 import re
 import numpy as np
-import click
 import matplotlib.pyplot as plt
+from .stream_utils import arrays_to_data_line
 from signal_tools.filter import trapezoid_filter
 
 
 @click.group("signal-io")
 @click.argument("file-path", type=click.Path(dir_okay=False))
-@click.argument("direction", type=click.Choice(["in", "out", "append"], case_sensitive=False))
-@click.argument("encoding", type=click.Choice(["bin", "utf-8"], case_sensitive=False))
+@click.argument("direction", type=click.Choice(["in", "out", "append"],
+                                               case_sensitive=False))
+@click.argument("encoding", type=click.Choice(["bin", "utf-8"],
+                                              case_sensitive=False))
 @click.pass_context
 def file_io(ctx, file_path: click.Path, direction: str, encoding: str) -> None:
     """
@@ -52,161 +55,67 @@ def file_io(ctx, file_path: click.Path, direction: str, encoding: str) -> None:
 
 @click.command()
 @click.argument("delimiter", type=str)
-@click.option("-s", "--signal-column", type=int, multiple=True, required=True,
+@click.option("-c", "--signal-column", type=int, multiple=True, required=True,
               help="index of the column that should be read in")
+@click.option("-t", "--column-type", multiple=True,
+              type=(int, click.Choice(['int', 'float'])),
+              help="Designate the data type of the column "
+                   "(either 'int' or 'float'), defaults to float",
+              default=(-1, 'float'))
 @click.pass_context
-def read_csv(ctx, delimiter, signal_column):
+def read_csv(ctx, delimiter: str,
+             signal_column: tuple[int],
+             column_type: tuple[tuple[int, str]]):
     """
     read in a file of CSV format.
     """
-    colname_regex = re.compile(
-        '^(?P<colname>\w+([\t| ]+\w+)*)[\t| ]?(:(?P<type>[int|float|str][arr]?):)?\[(?P<prefix>[k|m|u|n|p|f|M|G|T|E|ki|Mi|Gi|Ti])?(?P<unit>[m|V|A|g|K|cd|s|N])\]$')
     csvr = csv.reader(
         ctx.obj['in'], delimiter=delimiter, skipinitialspace=True)
     out = ctx.obj['out']
     col_names = next(csvr)
+    columns_with_types = list(map(lambda c: c[0], column_type))
+    if any(lambda i: i not in range(len(col_names)), columns_with_types):
+        raise ValueError(f"Invalid column index in column format "
+                         f"specification. {len(col_names)} available")
+    if any(lambda i: i not in range(len(col_names)), col_names):
+        raise ValueError(f"Invalid column index in column selection. {len(col_names)} available")
+
+    # generate the description dict for the requested data
     column_descriptions = []
     for i, name in enumerate(col_names):
-        cmatch = colname_regex.match(name)
-        if cmatch is None:
-            click.echo(f"'{name}'has an invalid format")
-            sys.exit(3)
-        column_descriptions.append({'name': cmatch.group('colname'),
-                                    'prefix': cmatch.group('prefix'),
-                                    'unit': cmatch.group('unit'),
-                                    'type': cmatch.group('type')
-                                    })
-    if len(col_names) < max(signal_column):
-        click.echo("Column requested that does not exist")
-        sys.exit(4)
-    requested_cols_desc = [column_descriptions[i] for i in signal_column]
+        if i in signal_column:
+            column_descriptions.append(
+                {'name': str(name),
+                 'type': column_type[i]
+                    if i in columns_with_types else 'float',
+                 'shape': [1]
+                 })
 
-    # write the requested_cols to the data stream
-    for col in requested_cols_desc:
-        out.write(f"{col['name']}:")
-        if col['type'] is not None:
-            out.write(f"{col['type']}:")
-        if col['prefix'] is not None:
-            out.write(f"{col['prefix']}")
-        if col['unit'] is not None:
-            out.write(f"{col['unit']}")
-        out.write(";")
-    out.write('\n')
+    # write the meta data for the requested columns to the data stream
+    out.write("Metadata:\n")
+    out.write(yaml.dump(column_descriptions))
+    out.write("\nData:\n")
 
     # now write the stream info to the
-    colcount = len(signal_column) - 1
-    error = False
     for line in csvr:
-        req_data = map(lambda elem: elem[1], filter(
-            lambda elem: elem[0] in signal_column, enumerate(line)))
-        for i, (elem, descr) in enumerate(zip(req_data, column_descriptions)):
-            match descr['type']:
-                case None:
-                    out.write(elem + ";")
-                case 'str':
-                    out.write(elem + ";")
-                case 'int':
-                    try:
-                        pelem = int(elem)
-                        out.write(repr(pelem))
-                    except ValueError:
-                        out.write("0")
-                        error = True
-                        click.echo(
-                            f"Error parsing integer on line {csvr.line_num}, column {signal_column[i]}")
-                case 'float':
-                    try:
-                        pelem = float(elem)
-                        out.write(repr(pelem))
-                    except ValueError:
-                        out.write("0.0")
-                        error = True
-                        click.echo(
-                            f"Error parsing float on line {csvr.line_num}, column {signal_column[i]}")
-                case _:
-                    click.echo("Parser Failiure. Stopping")
-                    sys.exit(4)
-            if i < colcount:
-                out.write(";")
-        if error:
-            sys.exit(5)
-        out.write("\n")
-    return
-
-
-@click.group()
-@click.pass_context
-def stream_cli(ctx: click.Context):
-    """
-    Handle all the parsing and pass the data to the subcommands
-    """
-    in_stream = click.get_text_stream('stdin')
-    metadata_line = in_stream.readline()
-    stream_descriptors = metadata_line.split(";")
-    descr_regex = re.compile(
-        r'(?P<name>\w+([\t| ]+\w+)*)(:(?P<type>[int|float|str](arr)?))?:((?P<prefix>[k|m|u|n|p|f|M|G|T|E|ki|Mi|Gi|Ti])?(?P<unit>[m|V|A|g|K|cd|s|N]))?')
-    meta_data = []
-    for sdescr in stream_descriptors:
-        m = descr_regex.match(sdescr)
-        if m is None:
-            click.echo("Malformed metadata line at beginning of stream")
-            sys.exit(4)
-        meta_data.append({'name': m.group('name'),
-                          'prefix': m.group('prefix'),
-                          'unit': m.group('unit'),
-                          'type': m.group('type')}
-                         )
-    line_regex = re.compile(
-        r'\[?([+|-]?[\d+|\d+\.\d+])[\],]?')
-
-    def parsed_stream():
-        for line in in_stream:
-            columns = [re.findall(line_regex, elem)
-                       for elem in line.split(';')]
-            parsed_cols = []
-            for elem, mdata in zip(columns, meta_data):
-                match mdata['type']:
-                    case 'int':
-                        parsed_cols.append(list(map(int, elem))[0])
-                    case 'float':
-                        parsed_cols.append(list(map(float, elem))[0])
-                    case 'intarr':
-                        parsed_cols.append(list(map(int, elem)))
-                    case 'floatarr':
-                        parsed_cols.append(list(map(float, elem)))
-            yield parsed_cols
-
-    ctx.obj = {'data': parsed_stream, 'metadata': meta_data}
-
-
-@click.command()
-@click.pass_context
-def print_input(ctx: click.Context) -> None:
-    """
-    Print the input read from the file. Make sure that the data has been
-    properly read in by the toolbox
-    """
-    try:
-        x = ctx.obj["x"]
-        click.echo("Reference:")
-        click.echo(x[0])
-        click.echo(x[1])
-    except KeyError:
-        pass
-    y = ctx.obj["y"]
-    click.echo("\nSignal:")
-    click.echo(y[0])
-    click.echo(y[1])
-    return
+        # filter out the columns that we wanted
+        req_data = list(
+                map(lambda elem: np.array([elem[1]]),
+                    filter(lambda elem: elem[0] in signal_column,
+                           enumerate(line))))
+        out.write(arrays_to_data_line(req_data))
 
 
 @click.command()
 @click.argument("lsb-magnitude", type=float)
+@click.option("-c", "--column", type=int, multiple=True, required=True,
+              help="Select the column that is to be processed")
 @click.option("-o", "--output", type=click.Path(dir_okay=False), default=None,
-              help="Specify a file to write the output of the command to. If not "
-              "specified, 'stdout' will be used")
+              help="Specify a file to write the output of the command to."
+              "If not specified, 'stdout' will be used")
 @click.pass_context
-def digitize(ctx: click.Context, lsb_magnitude: float, output: click.Path) -> None:
+def digitize(ctx: click.Context, lsb_magnitude: float,
+             output: click.Path) -> None:
     if output is not None:
         output_path = Path(str(output))
         out = open(output_path, 'w+')
