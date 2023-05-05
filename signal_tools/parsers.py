@@ -64,7 +64,6 @@ class SignalStreams:
             metadata = yaml.safe_load(metadata_str)
         except yaml.YAMLError as e:
             raise ValueError(f"Error parsing metadata: {e}")
-
         if "streams" not in metadata or not isinstance(metadata["streams"], list):
             raise ValueError("Metadata must contain a list of streams")
 
@@ -88,9 +87,9 @@ class SignalStreams:
         :raises ValueError: If the specified data type in the stream dictionary
                             is not supported.
         """
-        if stream["type"] == "int":
+        if stream["type"] == int:
             return int(value)
-        elif stream["type"] == "float":
+        elif stream["type"] == float:
             return float(value)
         else:
             raise ValueError(f"Unsupported data type: {stream['type']}")
@@ -125,9 +124,9 @@ class SignalStreams:
             num_elements = np.prod(shape) if shape[0] != -1 else 0
             dtype = stream["type"]
 
-            if dtype == "int":
+            if dtype == int:
                 value_pattern = int_pattern
-            elif dtype == "float":
+            elif dtype == float:
                 value_pattern = float_pattern
             else:
                 raise ValueError(f"Unsupported data type: {dtype}")
@@ -201,5 +200,4 @@ class SignalStreams:
             else:
                 tensor = np.array(tensor_values, dtype=stream_metadata["type"])
                 tensors.append(tensor)
-        print(tensors)
         return tensors

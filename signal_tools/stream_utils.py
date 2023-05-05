@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Iterable, Tuple, Any, Dict, List, Iterator, Sequence
+from typing import Generator, Iterable, Tuple, Any, Dict, List, Iterator, Sequence
 import numpy as np
 
 
@@ -29,8 +29,17 @@ def validate_metadata(metadata: Dict[str, Any]) -> None:
     """
     Validate the metadata
     """
+    # check that the required attributes are present
     if "shape" not in metadata or "type" not in metadata:
         raise ValueError("Each stream must have a 'shape' and 'type'")
+    # check the type
+    if metadata['type'] == "int":
+        metadata['type'] = int
+    elif metadata['type'] == "float":
+        metadata['type'] = float
+    else:
+        raise ValueError("The indicated type must be either int or float")
+    # check the shape
     if not isinstance(metadata["shape"], list | int):
         raise ValueError(
             "The shape attribute needs to be a list of "
@@ -52,28 +61,48 @@ def apply_operator_on_stream(metadata_operator: Callable, data_operator: Callabl
     return (metadata, datastream)
 
 
-def collect_stream_into_string(metadata: List[Dict[str, Any]], data: Sequence[Iterable]) -> Iterator[str]:
+def collect_stream_into_string(streams: List[Tuple[Dict[str, Any], Iterable]]) -> Iterator[str]:
     """
     Generate the string written to the file from the stream
     This is the final transformation back into a text file
     """
+    metadata = [s[0] for s in streams]
+    data = [s[1] for s in streams]
+
     # Write metadata section
     metadata_str = ""
     metadata_str += "Metadata:\n"
     metadata_str += "streams:\n"
     for stream in metadata:
+        if stream['type'] == int:
+            type_str = 'int'
+        else:
+            type_str = 'float'
+        print(type_str)
         metadata_str += f"  - name: {stream['name']}\n"
         metadata_str += f"    shape: {stream['shape']}\n"
-        metadata_str += f"    type: {stream['type']}\n"
+        metadata_str += f"    type: {type_str}\n"
 
     # Write data section
+
     metadata_str += "Data:\n"
     yield metadata_str
-    for data_row in data:
+
+    # define the function that produces one tuple from n iterators
+    def gen_tuple_from_n_iterators(iterators) -> Generator:
+        while True:
+            try:
+                t = [next(it) for it in iterators]
+            except StopIteration:
+                return
+            yield t
+
+    dlines = gen_tuple_from_n_iterators(data)
+    for line_data in dlines:
         row_strs = []
-        for i, stream in enumerate(metadata):
+        for i, entry in enumerate(line_data):
             tensor = np.array(
-                data_row[i], dtype=stream["type"]).flatten(order="F")
+                entry, dtype=metadata[i]["type"]).flatten(order="F")
             tensor_str = ", ".join(str(x) for x in tensor)
             row_strs.append(tensor_str)
         yield " | ".join(row_strs) + "\n"

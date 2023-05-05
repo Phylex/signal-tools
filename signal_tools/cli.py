@@ -1,12 +1,15 @@
 from pathlib import Path
 import sys
 import csv
+from click.types import IntRange
 import yaml
 import click
-import re
 import numpy as np
 import matplotlib.pyplot as plt
-from .stream_utils import arrays_to_data_line
+from copy import deepcopy
+from functools import partial
+from .stream_utils import arrays_to_data_line, collect_stream_into_string
+from .parsers import SignalStreams
 from signal_tools.filter import trapezoid_filter
 
 
@@ -23,7 +26,8 @@ def file_io(ctx, file_path: click.Path, direction: str, encoding: str) -> None:
 
     FILE-PATH determins the file that is to be read from.
     DIRECTION determins if data should be read from or written to the file and
-    ENCODING specifies if the file should be read as binary or utf-8 encoded file
+    ENCODING specifies if the file should be read as binary or utf-8 encoded
+    file
     """
     ctx.obj = {}
     io_file = Path(str(file_path))
@@ -79,21 +83,26 @@ def read_csv(ctx, delimiter: str,
         raise ValueError(f"Invalid column index in column format "
                          f"specification. {len(col_names)} available")
     if any(map(lambda i: i not in col_idx, signal_column)):
-        raise ValueError(f"Invalid column index in column selection. {len(col_names)} available")
+        raise ValueError(f"Invalid column index in column selection. "
+                         f"{len(col_names)} available")
 
     # generate the description dict for the requested data
     column_descriptions = []
     for i, name in enumerate(col_names):
         if i in signal_column:
+            if i in columns_with_types:
+                ct = column_type[i][1]
+            else:
+                ct = 'float'
             column_descriptions.append(
                 {'name': str(name),
-                 'type': str(column_type[i][1])
-                    if i in columns_with_types else 'float',
+                 'type': deepcopy(ct),
                  'shape': [1]
                  })
 
     # write the meta data for the requested columns to the data stream
     out.write("Metadata:\n")
+    out.write("streams:\n")
     out.write(yaml.dump(column_descriptions))
     out.write("\nData:\n")
 
@@ -101,16 +110,41 @@ def read_csv(ctx, delimiter: str,
     for line in csvr:
         # filter out the columns that we wanted
         req_data = list(
-                map(lambda elem: np.array([elem[1]]),
+                map(lambda elem: np.array([elem[1]],
+                                          dtype=column_descriptions[elem[0]]['type']),
                     filter(lambda elem: elem[0] in signal_column,
                            enumerate(line))))
         out.write(arrays_to_data_line(req_data)+'\n')
 
 
+@click.group("signal-transform")
+@click.option("-v", "--verbose", count=True)
+@click.option("-s", "--stream", type=click.IntRange(min=0, max_open=True), required=True,
+              help="Select the stream that the command should be applied to")
+@click.pass_context
+def apply_transformation(ctx: click.Context, verbose: int, stream: int):
+    """
+    Apply a Transformation onto one of the data streams.
+
+    This command prepares the data and lets the subcommands execute
+    """
+    stream_in = click.get_text_stream('stdin')
+    data_stream = SignalStreams(stream_in)
+    data_streams = data_stream.split_into_individual_streams()
+    if verbose > 0:
+        for i, (metadata, _) in enumerate(data_streams):
+            click.echo(f"Stream {i}: {metadata['name']}")
+    if stream > len(data_streams):
+        click.echo(f"No stream with index {stream}. "
+                   f"{len(data_streams)} streams available")
+        sys.exit()
+    ctx.obj = {}
+    ctx.obj['streams'] = data_streams
+    ctx.obj['selected_stream_idx'] = stream
+
+
 @click.command()
 @click.argument("lsb-magnitude", type=float)
-@click.option("-c", "--column", type=int, multiple=True, required=True,
-              help="Select the column that is to be processed")
 @click.option("-o", "--output", type=click.Path(dir_okay=False), default=None,
               help="Specify a file to write the output of the command to."
               "If not specified, 'stdout' will be used")
@@ -122,15 +156,23 @@ def digitize(ctx: click.Context, lsb_magnitude: float,
         out = open(output_path, 'w+')
     else:
         out = click.get_text_stream('stdout')
-    y = ctx.obj["y"]
-    try:
-        x = ctx.obj["x"]
-    except KeyError:
-        x = ("Measurement Samples", np.arange(len(y[1])))
-    measurements = y[1]
-    digitized_meas = [m // lsb_magnitude for m in measurements]
-    for x_el, y_el in zip(x[1], digitized_meas):
-        out.write(f"{x_el},{y_el}\n")
+    stream_idx = ctx.obj['selected_stream_idx']
+    data_iterators = [st[1] for st in ctx.obj['streams']]
+    metadata_copy = [deepcopy(ds[0]) for ds in ctx.obj['streams']]
+    metadata_copy[stream_idx]['type'] = int
+
+    def digitize_array(array: np.ndarray, lsb_mag: float) -> np.ndarray:
+        array = array / lsb_mag
+        return array.astype(int)
+
+    transformed_stream = map(
+            partial(digitize_array, lsb_mag=lsb_magnitude),
+            data_iterators[stream_idx])
+    data_iterators[stream_idx] = transformed_stream
+
+    output_it = collect_stream_into_string(list(zip(metadata_copy, data_iterators)))
+    for string in output_it:
+        out.write(string)
     out.close()
 
 
@@ -162,12 +204,16 @@ def apply_trapezoidal_filter(ctx: click.Context, k: int,
 
 
 @click.command()
+@click.argument('y', type=click.IntRange(0, max_open=True))
+@click.option('-m', '--mode',
+              type=click.Choice(['xy', 'waterfall', 'matrix', 'scatter']),
+              help="set the type of plot that will be produced")
+@click.option('-x', '--xaxis', type=IntRange(0, max_open=True),
+              help="Specify the X axis for which to plot which to plot")
 @click.pass_context
-def plot(ctx: click.Context):
-    x = ctx.obj["x"][1]
-    y = ctx.obj["y"][1]
-    plt.plot(list(x), list(y))
-    plt.show()
+def plot(ctx: click.Context, y: int, mode: str, xaxis: int) -> None:
+    ...
 
 
 file_io.add_command(read_csv)
+apply_transformation.add_command(digitize)
