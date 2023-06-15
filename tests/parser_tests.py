@@ -104,10 +104,10 @@ def test_data_stream(input_data: str,
 
 
 @pytest.mark.parametrize("stream, value_str, expected_value", [
-    ({"type": "int"}, "42", 42),
-    ({"type": "int"}, "-5", -5),
-    ({"type": "float"}, "3.14", 3.14),
-    ({"type": "float"}, "-0.5", -0.5),
+    ({"type": int}, "42", 42),
+    ({"type": int}, "-5", -5),
+    ({"type": float}, "3.14", 3.14),
+    ({"type": float}, "-0.5", -0.5),
 ])
 def test_convert_type(stream: dict[str, Any], value_str: str, expected_value: Any):
     converted_value = SignalStreams._convert_type(stream, value_str)
@@ -125,43 +125,43 @@ def test_convert_type_unsupported_type(stream: dict[str, Any], value_str: str):
 
 @pytest.mark.parametrize("streams, example_data", [
     (
-        [{"type": "int", "shape": [2]}],
+        [{"type": int, "shape": [2]}],
         ["42 -5", "100 200", "-1 0"]
     ),
     (
-        [{"type": "float", "shape": [2]}],
+        [{"type": float, "shape": [2]}],
         ["3.14 -0.5", "1.0 2.0", "1.23e-4 5.67E+8"]
     ),
     (
-        [{"type": "int", "shape": (2,)}, {"type": "float", "shape": (2,)}],
+        [{"type": int, "shape": (2,)}, {"type": float, "shape": (2,)}],
         ["42 -5 | 3.14 -0.5", "1 2 | 3.0 4.0", "0 0 | 0.0 0.0"]
     ),
     (
-        [{"type": "float", "shape": (2, 2)}],
+        [{"type": float, "shape": (2, 2)}],
         ["1.0 2.0 3.0 4.0", "1.23 -4.56 7.89 -0.12"]
     ),
     (
-        [{"type": "int", "shape": (1,)}, {"type": "float", "shape": (2, 1)}],
+        [{"type": int, "shape": (1,)}, {"type": float, "shape": (2, 1)}],
         ["1 | 2.0 3.0", "0 | 0.0 0.0", "-1 | 1.23 4.56"]
     ),
     (
-        [{"type": "int", "shape": (2,)}],
+        [{"type": int, "shape": (2,)}],
         ["42 -5", "100, 200", "-1, 0"]
     ),
     (
-        [{"type": "float", "shape": (2,)}],
+        [{"type": float, "shape": (2,)}],
         ["3.14 -0.5", "1.0, 2.0", "1.23e-4, 5.67E+8"]
     ),
     (
-        [{"type": "int", "shape": (2,)}, {"type": "float", "shape": (2,)}],
+        [{"type": int, "shape": (2,)}, {"type": float, "shape": (2,)}],
         ["42 -5 | 3.14 -0.5", "1, 2 | 3.0, 4.0", "0, 0 | 0.0, 0.0"]
     ),
     (
-        [{"type": "float", "shape": (2, 2)}],
+        [{"type": float, "shape": (2, 2)}],
         ["1.0 2.0 3.0 4.0", "1.23, -4.56, 7.89, -0.12"]
     ),
     (
-        [{"type": "int", "shape": (1,)}, {"type": "float", "shape": (2, 1)}],
+        [{"type": int, "shape": (1,)}, {"type": float, "shape": (2, 1)}],
         ["1 | 2.0 3.0", "0 | 0.0, 0.0", "-1 | 1.23, 4.56"]
     ),
 ])
@@ -175,23 +175,23 @@ def test_generate_data_regex(streams: list[dict[str, Any]], example_data: list[s
 
 @pytest.mark.parametrize("streams, invalid_data", [
     (
-        [{"type": "int", "shape": (2,)}],
+        [{"type": int, "shape": (2,)}],
         "42 -5 3"
     ),
     (
-        [{"type": "float", "shape": (2,)}],
+        [{"type": float, "shape": (2,)}],
         "3.14 -0.5 1.0"
     ),
     (
-        [{"type": "int", "shape": (2,)}, {"type": "float", "shape": (2,)}],
+        [{"type": int, "shape": (2,)}, {"type": float, "shape": (2,)}],
         "42 -5 3.14"
     ),
     (
-        [{"type": "float", "shape": (2, 2)}],
+        [{"type": float, "shape": (2, 2)}],
         "1.0 2.0 3.0"
     ),
     (
-        [{"type": "int", "shape": (1,)}, {"type": "float", "shape": (2, 1)}],
+        [{"type": int, "shape": (1,)}, {"type": float, "shape": (2, 1)}],
         "1 2.0"
     ),
 ])
@@ -322,7 +322,7 @@ Data:
 10, 9, 8, 7 | 13.2, 14.2, 15.2 | 14, 15, 16, 17, 18,
 """,
         [
-            ({"name": "stream1", "type": "int", "shape": [2, 2]},
+            ({"name": "stream1", "type": int, "shape": [2, 2]},
              [np.array([[1, 3], [2, 4]]),
               np.array([[4, 2], [3, 1]]),
               np.array([[6, 4], [5, 3]]),
@@ -330,7 +330,7 @@ Data:
               np.array([[10, 8], [9, 7]])
               ]
              ),
-            ({"name": "stream2", "type": "float", "shape": [3]},
+            ({"name": "stream2", "type": float, "shape": [3]},
              [np.array([1.1, 2.2, 3.3]),
               np.array([4.4, 5.5, 6.6]),
               np.array([7.7, 8.8, 9.9]),
@@ -338,7 +338,7 @@ Data:
               np.array([13.2, 14.2, 15.2]),
               ]
              ),
-            ({"name": "stream3", "type": "int", "shape": [-1]},
+            ({"name": "stream3", "type": int, "shape": [-1]},
              [np.array([5, 6]),
               np.array([7, 8, 9]),
               np.array([10, 11, 12, 13]),
