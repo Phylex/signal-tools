@@ -2,15 +2,14 @@ from pathlib import Path
 import sys
 import csv
 from click.types import IntRange
+from typing import Tuple
 import yaml
 import click
 import numpy as np
-import matplotlib.pyplot as plt
 from copy import deepcopy
 from functools import partial
 from .stream_utils import arrays_to_data_line, collect_stream_into_string
 from .parsers import SignalStreams
-from signal_tools.filter import trapezoid_filter
 
 
 @click.group("signal-io")
@@ -110,16 +109,18 @@ def read_csv(ctx, delimiter: str,
     for line in csvr:
         # filter out the columns that we wanted
         req_data = list(
-                map(lambda elem: np.array([elem[1]],
-                                          dtype=column_descriptions[elem[0]]['type']),
-                    filter(lambda elem: elem[0] in signal_column,
-                           enumerate(line))))
+            map(lambda elem: np.array([elem[1]],
+                                      dtype=column_descriptions[elem[0]]['type']),
+                filter(lambda elem: elem[0] in signal_column,
+                       enumerate(line))))
         out.write(arrays_to_data_line(req_data)+'\n')
 
 
 @click.group("signal-transform")
 @click.option("-v", "--verbose", count=True)
-@click.option("-s", "--stream", type=click.IntRange(min=0, max_open=True), required=True,
+@click.option("-s", "--stream",
+              type=click.IntRange(min=0, max_open=True),
+              required=True,
               help="Select the stream that the command should be applied to")
 @click.pass_context
 def apply_transformation(ctx: click.Context, verbose: int, stream: int):
@@ -151,11 +152,14 @@ def apply_transformation(ctx: click.Context, verbose: int, stream: int):
 @click.pass_context
 def digitize(ctx: click.Context, lsb_magnitude: float,
              output: click.Path) -> None:
+    # Select the right output type
     if output is not None:
         output_path = Path(str(output))
         out = open(output_path, 'w+')
     else:
         out = click.get_text_stream('stdout')
+
+    # get the input from the context
     stream_idx = ctx.obj['selected_stream_idx']
     data_iterators = [st[1] for st in ctx.obj['streams']]
     metadata_copy = [deepcopy(ds[0]) for ds in ctx.obj['streams']]
@@ -166,11 +170,12 @@ def digitize(ctx: click.Context, lsb_magnitude: float,
         return array.astype(int)
 
     transformed_stream = map(
-            partial(digitize_array, lsb_mag=lsb_magnitude),
-            data_iterators[stream_idx])
+        partial(digitize_array, lsb_mag=lsb_magnitude),
+        data_iterators[stream_idx])
     data_iterators[stream_idx] = transformed_stream
 
-    output_it = collect_stream_into_string(list(zip(metadata_copy, data_iterators)))
+    output_it = collect_stream_into_string(
+        list(zip(metadata_copy, data_iterators)))
     for string in output_it:
         out.write(string)
     out.close()
@@ -187,20 +192,7 @@ def digitize(ctx: click.Context, lsb_magnitude: float,
 def apply_trapezoidal_filter(ctx: click.Context, k: int,
                              l: int, m: int,
                              output: click.Path):
-    signal = ctx.obj["y"][1]
-    try:
-        x = ctx.obj["x"][1]
-    except KeyError:
-        x = np.arange(len(signal))
-    if output is not None:
-        out_path = Path(str(output))
-        out = open(out_path, 'w+')
-    else:
-        out = click.get_text_stream('stdout')
-    transformed_signal = list(trapezoid_filter(k, l, m, signal))
-    for x_el, sig_el in zip(x, transformed_signal):
-        out.write(f"{x_el},{sig_el}\n")
-    out.close()
+    ...
 
 
 @click.command()
@@ -213,6 +205,88 @@ def apply_trapezoidal_filter(ctx: click.Context, k: int,
 @click.pass_context
 def plot(ctx: click.Context, y: int, mode: str, xaxis: int) -> None:
     ...
+
+
+@click.group("signal-generate")
+@click.option("-o", "--output",
+              type=click.Path(dir_okay=False),
+              default=None,
+              help="Specify a file to write the output of the command to. "
+              "If not specified, 'stdout' will be used")
+@click.option("-i", "--input",
+              is_flag=True,
+              default=False,
+              help="Indicate that there is an input file to"
+                   "which to add another stream")
+@click.option("-s", "--samples",
+              type=click.IntRange(1, max_open=True),
+              default=100)
+@click.pass_context
+def signal_generate(ctx: click.Context,
+                    output: click.Path,
+                    input: bool,
+                    samples: int):
+    # open the output or stdout
+    if output is not None:
+        out_path = Path(str(output))
+        out = open(out_path, 'w+')
+    else:
+        out = click.get_text_stream('stdout')
+    ctx.obj = {}
+    ctx.obj['out'] = out
+    ctx.obj['samples'] = samples
+    
+    # get the input stream and attach the stream processor to it
+    if input:
+        stream_in = click.get_text_stream('stdin')
+        data_stream = SignalStreams(stream_in)
+        data_streams = data_stream.split_into_individual_streams()
+        ctx.obj['in'] = data_streams
+        ctx.obj['samples'] = None
+    else:
+        ctx.obj["in"] = None
+
+
+@click.command()
+@click.argument("name", type=str)
+@click.option("-c", "--chunk-size",
+              type=click.IntRange(1, max_open=True),
+              default=10,
+              help="Number of data points that are generated befor"
+                   " being written to the output")
+@click.option("-s", "--shape",
+              type=click.IntRange(0, max_open=True),
+              multiple=True)
+@click.option("-r", "--range",
+              type=(float, float),
+              default=(0, 1),
+              help="Define the range of the random numbers")
+@click.pass_context
+def gen_random_numbers(ctx: click.Context,
+                       name: str,
+                       chunk_size: int,
+                       shape: Tuple[int],
+                       range_: Tuple[float, float]):
+    """
+    Generate <sample> sets of random numbers in <shape>
+    and write them into a stream.
+
+    generate <chunk-size> samples at a time
+    """
+    input = ctx.obj["in"]
+    if input is None:
+        input = []
+        samples = ctx.obj["samples"]
+    else:
+        samples = None
+
+    # this is the generator function we will use
+    # to actually generate the numbers and
+    # yield them to be serialized
+    from .generators import rngen
+    input.append(({"type": float, "name": name, "shape": list(shape)},
+                  rngen(shape, range_, chunk_size,
+                        samples)))
 
 
 file_io.add_command(read_csv)
